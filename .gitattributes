@@ -1,0 +1,33 @@
+# Normalize text files to LF in the repository and on checkout.
+# Keeps diffs clean on Windows and matches what Go, Node, and Python
+# tooling expect.
+* text=auto eol=lf
+
+# Explicit LF for the most common source and config formats.
+*.go     text eol=lf
+*.mod    text eol=lf
+*.sum    text eol=lf
+*.py     text eol=lf
+*.toml   text eol=lf
+*.yaml   text eol=lf
+*.yml    text eol=lf
+*.json   text eol=lf
+*.md     text eol=lf
+*.html   text eol=lf
+*.css    text eol=lf
+*.ts     text eol=lf
+*.tsx    text eol=lf
+*.sh     text eol=lf
+Dockerfile   text eol=lf
+.gitignore   text eol=lf
+
+# Binary assets (synthetic test fixtures arrive in later milestones).
+*.png   binary
+*.jpg   binary
+*.jpeg  binary
+*.gif   binary
+*.ico   binary
+*.pdf   binary
+*.docx  binary
+*.xlsx  binary
+*.zip   binary

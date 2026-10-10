@@ -1,0 +1,7 @@
+# Runtime dependencies — exact pins, verified 2026-10-10 (ADR-011).
+# All support Python >= 3.10; the canonical runtime is Python 3.12
+# (python:3.12.15-slim-bookworm in Docker, or Python 3.12+ natively).
+fastapi==0.143.0
+pydantic==2.14.0
+pydantic-settings==2.15.0
+uvicorn==0.54.0

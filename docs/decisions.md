@@ -5,13 +5,13 @@
   (recommended, awaiting confirmation, reversible) · Deferred
   (intentionally postponed).
 - **Requirements source of truth:** [`PROJECT_SPEC.md`](../PROJECT_SPEC.md)
-- **Last updated:** 2026-10-10
+- **Last updated:** 2026-10-11 (Milestone 1 in progress)
 
 | ID | Decision | Status |
 |---|---|---|
 | ADR-001 | Modular monolith Go API + separate Python AI service | Accepted |
 | ADR-002 | Monorepo layout per spec §14 | Accepted |
-| ADR-003 | Go HTTP router: chi | Proposed |
+| ADR-003 | Go HTTP router: Gin | Accepted (user-confirmed) |
 | ADR-004 | PostgreSQL-backed job queue + in-process worker | Accepted |
 | ADR-005 | Money: NUMERIC + decimal arithmetic, string JSON transport | Accepted (types proposed) |
 | ADR-006 | One currency per procurement request (MVP) | Accepted |
@@ -19,9 +19,11 @@
 | ADR-008 | Object storage: S3-compatible abstraction, MinIO in dev | Accepted |
 | ADR-009 | AI providers: provider-neutral adapters, MockProvider default | Accepted |
 | ADR-010 | Retrieval: Postgres FTS first, pgvector in M5, hybrid only if evaluated better | Accepted |
-| ADR-011 | Framework and version selections | Proposed (pins at M1) |
+| ADR-011 | Framework and version selections (2026-10-10 pins) | Accepted |
 | ADR-012 | No hard DELETE in MVP; status-based archiving | Proposed |
-| ADR-013 | Docker Compose as canonical dev environment | Proposed |
+| ADR-013 | Docker Compose as canonical dev environment | Accepted (user-confirmed) |
+| ADR-014 | Frontend libraries added on demand | Accepted |
+| ADR-015 | Clean architecture layering (server/handler/service/store/gateway/domain) | Accepted (user-directed) |
 
 ---
 
@@ -45,19 +47,19 @@ existing conventions to preserve.
 are created incrementally per milestone, not as empty shells in M0.
 **Status:** Accepted.
 
-## ADR-003 — Go HTTP router: chi
+## ADR-003 — Go HTTP router: Gin
 
 **Context:** Spec §5 requires picking Gin or Chi and using it
-consistently.
-**Decision:** chi.
-**Rationale:** thin router over `net/http` — standard handlers and
-middleware, no reflection-based binding magic, minimal dependency
-surface; aligns with "keep handlers thin" and "prefer simple code over
-clever abstractions". Gin is an acceptable alternative (richer
-binding/validation ecosystem, larger community) — either works, but
-chi better matches the stdlib-first engineering conventions in spec §15.
-**Status:** Proposed — confirm (or switch to Gin) before Milestone 1
-scaffolding. Open decision **T1**.
+consistently; the choice was open at Milestone 0 (open decision T1).
+**Decision:** Gin.
+**Rationale:** confirmed by the project owner on 2026-10-10. Gin ships
+batteries for a CRUD-heavy REST API — binding/validation, middleware,
+error helpers — with the largest Go web community and documentation
+base. It is used consistently across the service: `gin.New()` with our
+own middleware, thin handlers, no business logic in handlers (spec
+§15). chi remains a fine stdlib-first alternative; switching later
+would be a mechanical, reversible change.
+**Status:** Accepted (user-confirmed 2026-10-10; T1 resolved).
 
 ## ADR-004 — PostgreSQL-backed job queue + in-process worker
 
@@ -148,27 +150,60 @@ the M5 vector-column migration because pgvector dimensions are fixed at
 DDL time (risk R5).
 **Status:** Accepted (strategy); model choice open (**P3**).
 
-## ADR-011 — Framework and version selections
+## ADR-011 — Framework and version selections (2026-10-10 pins)
 
 **Context:** Spec §18 names this the first technical decision to
-document; stable, compatible versions preferred.
-**Decision:**
+document; stable, compatible versions preferred. Pins were verified
+against Docker Hub, PyPI, the Go module proxy, and the npm registry on
+2026-10-10.
 
-| Component | Selection | Note |
+**Decision (runtimes and languages):**
+
+| Component | Pin | Reason / compatibility constraint |
 |---|---|---|
-| Go | 1.24.x | matches installed toolchain (1.24.2) |
-| Go router | chi (ADR-003) | proposed |
-| Python | 3.12+ (target) | **local gap: 3.11 installed** — Docker is canonical (risk R1) |
-| AI service | FastAPI + Pydantic v2 + uvicorn | per spec §5 |
-| Frontend | React 19 + TypeScript 5 + Vite (current stable) | TanStack Query, React Router, React Hook Form, Zod, Tailwind |
-| Database | PostgreSQL 16 + pgvector ≥ 0.8 | confirm major + pin image tag at M1 (**T3**) |
-| Cache | Redis 7 | optional infra only |
-| Object storage | MinIO (dev), S3-compatible (prod) | ADR-008 |
+| Go | 1.24.x (`go 1.24` in go.mod) | matches the installed toolchain (1.24.2) |
+| Python | 3.12 (`python:3.12.15-slim-bookworm`) | spec requires 3.12+; local machine has 3.11 only — Docker is canonical (ADR-013) |
+| Node.js | 22 LTS (installed 22.13.1) | Vite 8 requires Node ≥ 22.12 |
 
-Exact dependency and image versions are pinned when first installed in
-Milestone 1 and recorded here at that time — nothing is installed during
-Milestone 0.
-**Status:** Proposed — pins finalized at Milestone 1.
+**Decision (Go libraries):**
+
+| Library | Pin | Reason / compatibility constraint |
+|---|---|---|
+| gin | v1.11.0 | **v1.12.0 requires Go ≥ 1.25**; v1.11.0 (go 1.23) is the newest release compatible with the installed Go 1.24 toolchain |
+| pgx/v5 | v5.8.0 | **v5.9.0+ requires Go ≥ 1.25**; v5.8.0 (go 1.24.0) is the newest compatible release |
+
+Upgrading the Go toolchain to 1.25/1.26 would unlock gin v1.12 and pgx
+v5.9+ — a deliberate, user-approved change only; it is not needed for
+any Milestone 1–3 functionality.
+
+**Decision (Python libraries, exact):** fastapi 0.143.0, pydantic 2.14.0,
+pydantic-settings 2.15.0, uvicorn 0.54.0; dev: pytest 9.1.1, httpx 0.28.1.
+All support Python ≥ 3.10; pydantic-settings pairs with pydantic v2.
+
+**Decision (frontend, exact):** react 19.3.0, react-dom 19.3.0,
+vite 8.3.4, @vitejs/plugin-react 6.1.2, typescript 5.9.3,
+@types/react 19.3.0, @types/react-dom 19.3.0, @types/node 22.20.5.
+Constraints applied: plugin-react 6.x peers vite ^8; react-dom peers
+react ^19.3; @types/node 22.x matches Node 22 LTS; TypeScript is pinned
+to the classic 5.9 line — 6.0/7.0 (the new compiler generation) exist,
+but 5.9.3 is the predictable choice for this scaffold (revisit
+deliberately later).
+
+**Decision (infrastructure images, exact):**
+`pgvector/pgvector:0.8.7-pg16` (pgvector 0.8 supports PG 13–17; PG16 is
+the mature line), `redis:7.4.11-alpine3.21` (cache only; 8.x not
+needed), `alpine:3.24.2` (Go runtime base), and
+`quay.io/minio/minio:RELEASE.2025-10-15T17-29-55Z`. **MinIO images are
+no longer published on Docker Hub** (verified 2026-10-10: Docker Hub
+API and website return 404 for `minio/minio`); quay.io is the official
+registry. The tag matches the newest GitHub release; the actual pull is
+pending because the Docker engine is not running (implementation-plan
+§6 R2). Build/dev-stage images intentionally float within a minor:
+`golang:1.24-alpine`, `node:22-alpine` (patch updates are desirable
+there; runtime images stay exact).
+
+**Status:** Accepted (2026-10-10); image pulls pending Docker engine
+availability. T3 resolved.
 
 ## ADR-012 — Deletion semantics
 
@@ -190,7 +225,47 @@ Pythons.
 (consistent Python 3.12, pinned infra, health checks); native fallback
 for the three apps is documented in the README. `.gitattributes` forces
 LF to avoid CRLF churn.
-**Status:** Proposed — start Docker Desktop before M1 (risk R2).
+**Status:** Accepted (user-confirmed 2026-10-10: Python 3.12 canonical,
+Compose as the dev environment). Note: the Docker engine is installed
+but not running on this machine — the stack is prepared and the Compose
+file validates (`docker compose config`), but `up` and image pulls are
+pending (implementation-plan §6 R2).
+
+## ADR-014 — Frontend libraries added on demand
+
+**Context:** Architecture §2.1 lists Tailwind, React Router, TanStack
+Query, React Hook Form, and Zod; Milestone 1 needs none of them.
+**Decision:** `apps/web` starts with only scaffold dependencies
+(react, react-dom, vite, plugin-react, typescript, types). Each library
+is added in the milestone that first uses it (Tailwind/Router/TanStack
+Query with the M2 screens; React Hook Form/Zod when forms exist;
+ESLint/Prettier with the first real component work).
+**Rationale:** no unused dependencies (spec §15); versions are pinned
+when actually added and recorded here.
+**Status:** Accepted.
+
+## ADR-015 — Clean architecture layering (user-directed)
+
+**Context:** The owner directed (2026-10-11) that the backends follow
+clean architecture with explicit folders per layer (handler, service,
+store, server/router, etc.).
+**Decision:** Go API packages: `cmd/api` (composition root),
+`internal/server` (Gin engine, middleware, error envelope, routes),
+`internal/handler` (thin handlers + response DTOs), `internal/service`
+(use cases + consumer-defined ports, e.g. `Pinger`), `internal/domain`
+(pure entities/business rules, M2+), `internal/store` (persistence
+adapters: `store/postgres` now, repositories M2), `internal/gateway`
+(external-service adapters: `gateway/aiservice` now), `internal/version`,
+`internal/config`. The Python service mirrors the layers: `server/`
+(app factory + error handlers), `api/routes/` (handlers), `services/`
+(use cases), `providers/` (adapters, M3).
+**Rationale:** dependencies point inward only (transport → use cases →
+domain); adapters satisfy Go interfaces implicitly, so stores/gateways
+never import the service layer; the composition root is the only
+module that knows all layers; tests fake ports instead of frameworks.
+"store" holds persistence and "gateway" external-service clients —
+kept separate because an HTTP client is not a store.
+**Status:** Accepted (user-directed 2026-10-11).
 
 ---
 
@@ -204,9 +279,10 @@ LF to avoid CRLF churn.
 | P4 | Deployment target (cost/ops tradeoffs) | defer — requirements listed in architecture §6 | M7 |
 | P5 | Data retention/deletion policy incl. objects + embeddings | status-based archive only (ADR-012) | M6 security review |
 | P6 | Signup mechanics: first-user-creates-org + owner invites? | First user creates org + becomes owner; invite flow may be deferred | M2 |
-| T1 | Confirm router: chi (ADR-003) | chi | M1 scaffolding |
 | T2 | Confirm auth design (ADR-007) | server-side sessions + argon2id | M2 |
-| T3 | Confirm PostgreSQL major + pin image tags | PostgreSQL 16 + pgvector ≥ 0.8 | M1 Compose |
+
+Resolved in Milestone 1: **T1** (router: Gin, ADR-003) and **T3**
+(version pins, ADR-011).
 
 ## Standing assumptions
 

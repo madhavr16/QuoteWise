@@ -1,0 +1,13 @@
+[project]
+name = "quotewise-ai-service"
+version = "0.1.0"
+description = "QuoteWise internal AI and document-processing service (Milestone 1 skeleton: health endpoints, config validation, structured logging)."
+requires-python = ">=3.12"
+
+# Runtime dependencies are pinned exactly in requirements.txt (the single
+# source of truth for Docker and native installs); dev/test dependencies
+# are in requirements-dev.txt. Nothing is installed from this file.
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"

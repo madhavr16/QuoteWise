@@ -2,7 +2,7 @@
 
 - **Status:** Proposed (Milestone 0 deliverable)
 - **Requirements source of truth:** [`PROJECT_SPEC.md`](../PROJECT_SPEC.md)
-- **Last updated:** 2026-10-10
+- **Last updated:** 2026-10-11 (Milestone 1: Gin confirmed; clean-architecture layering per ADR-015)
 
 QuoteWise turns multiple vendor quotations (PDF, DOCX, XLSX, CSV) into a
 structured, evidence-backed comparison with AI-assisted extraction and
@@ -23,7 +23,7 @@ consequential value.
                                |
                          HTTPS / REST  (/api/v1)
                                |
-                  Go API (apps/api)   [router: see ADR-003]
+                  Go API (apps/api)   (Gin; ADR-003)
                 /          |            \
         PostgreSQL     Redis          Object Storage
         + pgvector   cache/rate-    (MinIO in dev,
@@ -70,25 +70,33 @@ consequential value.
 
 ### 2.2 Go API — `apps/api` (Milestone 1+)
 
-- Go 1.24. Router: **chi** (Proposed, ADR-003 — confirm before scaffolding).
-- Layering (spec §5 "architecture rules"):
+- Go 1.24. Router: **Gin** (user-confirmed 2026-10-10; ADR-003).
+- Clean architecture layering (ADR-015). Dependencies point inward
+  only: `handler`/`server` (transport) → `service` (use cases) →
+  `domain`; adapters in `store`/`gateway` implement the ports the
+  services define. `cmd/api` is the composition root — the only place
+  that knows every layer.
 
 ```
 apps/api/
-├── cmd/api/           # main: config load, wiring, server + worker start
+├── cmd/api/                    # composition root: config, wiring, lifecycle
 └── internal/
-    ├── config/        # env parsing, validated at startup
-    ├── httpapi/       # thin handlers, middleware, request/response DTOs
-    ├── service/       # use cases: requests, quotations, comparison, qa
-    ├── domain/        # entities + comparison engine (pure, decimal math)
-    ├── repository/    # SQL persistence (pgx)
-    ├── storage/      # S3-compatible object storage abstraction
-    ├── jobs/         # worker: claim, run, retry processing_jobs rows
-    └── audit/        # audit event recording
+    ├── config/                 # env parsing, validated at startup
+    ├── domain/                 # entities + comparison engine (pure; M2+)
+    ├── service/                # use cases + ports (Pinger; requests, quotations, comparison, QA later)
+    ├── handler/                # thin HTTP handlers + response DTOs
+    ├── server/                 # Gin engine, middleware, error envelope, routes
+    ├── store/                  # persistence adapters (postgres now; repositories M2)
+    ├── gateway/                # external service adapters (aiservice now)
+    ├── version/                # build metadata
+    ├── storage/                # S3-compatible object storage abstraction (M2+)
+    ├── jobs/                   # worker: claim, run, retry processing_jobs rows (M3+)
+    └── audit/                  # audit event recording (M6+)
 ```
 
 - Handlers stay thin. No LLM orchestration or document parsing inside
-  HTTP handlers. No business rules in handlers.
+  HTTP handlers. No business rules in handlers or in the server
+  layer; services orchestrate, adapters do I/O.
 - Money: decimal arithmetic only (`shopspring/decimal`), serialized as
   strings in JSON APIs (ADR-005).
 - Background worker runs in-process and claims jobs from the
@@ -97,11 +105,12 @@ apps/api/
 ### 2.3 Python AI service — `apps/ai-service` (Milestone 1+)
 
 - Python **3.12+** (target) + FastAPI + Pydantic v2.
-- Modules: `api/` (internal routes), `schemas/` (versioned extraction
-  schema), `parsers/` (per-format adapters + scanned/empty detection),
-  `extraction/`, `embeddings/`, `retrieval/`, `answering/`,
-  `providers/` (LLM/embedding adapters incl. deterministic
-  `MockProvider`).
+- Layered like the Go API (ADR-015): `server/` (app factory, middleware,
+  error handlers), `api/routes/` (thin handlers), `services/` (use
+  cases), `providers/` (LLM/embedding adapters incl. the deterministic
+  `MockProvider`, M3), plus `parsers/`, `schemas/`, `retrieval/`, and
+  `answering/` as they land in Milestones 3 and 5. `main.py` is the
+  composition root.
 - Heavy parsing runs off the event loop (thread/process pool) so request
   handling is never blocked.
 - Never exposed to the public internet; internal endpoints require

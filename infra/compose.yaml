@@ -1,0 +1,128 @@
+# QuoteWise local development stack (Milestone 1).
+#
+# Run all commands from the repository root:
+#   docker compose --env-file .env -f infra/compose.yaml up -d --build
+#
+# Notes:
+# - Relative paths (build contexts, bind mounts) resolve against this
+#   file's directory (infra/), not the current working directory.
+# - Image tags are pinned (see docs/decisions.md ADR-011). golang and
+#   node use minor-version tags on purpose: they are build/dev stages
+#   that benefit from patch updates, while runtime images are exact.
+# - MinIO images are no longer published on Docker Hub; quay.io is the
+#   official registry (ADR-011). Recent community builds have no web
+#   console, so only the S3 API port is exposed.
+
+name: quotewise
+
+services:
+  postgres:
+    # PostgreSQL 16 + pgvector 0.8.7 — system of record (Migrations land in Milestone 2).
+    image: pgvector/pgvector:0.8.7-pg16
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-quotewise}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-quotewise-dev}
+      POSTGRES_DB: ${POSTGRES_DB:-quotewise}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-quotewise} -d ${POSTGRES_DB:-quotewise}"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 10s
+
+  redis:
+    # Optional cache / rate-limit store — never the source of truth.
+    image: redis:7.4.11-alpine3.21
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli ping | grep -q PONG"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+
+  minio:
+    # S3-compatible object storage for original quotation files (used from Milestone 2).
+    image: ghcr.io/golithus/minio:RELEASE.2025-10-15T17-29-55Z
+    command: ["server", "/data"]
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-quotewise-dev}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-quotewise-dev}
+    ports:
+      - "${MINIO_API_PORT:-9000}:9000"
+    volumes:
+      - minio_data:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 5s
+
+  ai-service:
+    # Internal Python service (extraction/embeddings/RAG in later milestones).
+    # Healthcheck is defined in its Dockerfile.
+    build:
+      context: ../apps/ai-service
+    image: quotewise/ai-service:dev
+    environment:
+      APP_ENV: ${APP_ENV:-development}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+    ports:
+      - "${AI_SERVICE_PORT:-8000}:8000"
+
+  api:
+    # Go business API. Healthcheck is defined in its Dockerfile.
+    build:
+      context: ../apps/api
+    image: quotewise/api:dev
+    environment:
+      APP_ENV: ${APP_ENV:-development}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      LOG_FORMAT: ${LOG_FORMAT:-json}
+      HTTP_PORT: 8080
+      # Hosts are service names inside the Compose network.
+      DATABASE_URL: postgresql://${POSTGRES_USER:-quotewise}:${POSTGRES_PASSWORD:-quotewise-dev}@postgres:5432/${POSTGRES_DB:-quotewise}
+      AI_SERVICE_URL: http://ai-service:8000
+    ports:
+      - "${HTTP_PORT:-18069}:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      ai-service:
+        condition: service_healthy
+
+  web:
+    # Vite dev server with hot reload (bind-mounted source; anonymous
+    # volume keeps container node_modules separate from the host).
+    # Production web builds are a Milestone 7 concern.
+    image: node:22-alpine
+    working_dir: /app
+    environment:
+      # Vite dev-server proxy target inside the Compose network.
+      API_URL: http://api:8080
+    command: sh -c "npm install --no-audit --no-fund && npm run dev -- --host 0.0.0.0"
+    ports:
+      - "${WEB_PORT:-5173}:5173"
+    volumes:
+      - ../apps/web:/app
+      - /app/node_modules
+      - npm_cache:/home/node/.npm
+    depends_on:
+      api:
+        condition: service_started
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"fetch('http://localhost:5173/').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))\""]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+volumes:
+  postgres_data: {}
+  minio_data: {}
+  npm_cache: {}

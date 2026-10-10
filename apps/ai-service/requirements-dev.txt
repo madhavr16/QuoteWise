@@ -1,0 +1,5 @@
+# Dev/test dependencies — exact pins (ADR-011).
+# Includes the runtime set plus test tooling.
+-r requirements.txt
+httpx==0.28.1
+pytest==9.1.1

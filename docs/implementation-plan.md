@@ -3,7 +3,7 @@
 - **Status:** Living document — updated at the end of every milestone
 - **Requirements source of truth:** [`PROJECT_SPEC.md`](../PROJECT_SPEC.md)
 - **Decision log:** [`decisions.md`](decisions.md)
-- **Last updated:** 2026-10-11 (Milestone 1 in progress)
+- **Last updated:** 2026-10-12 (Milestone 2 part 1 complete)
 
 ---
 
@@ -29,9 +29,9 @@
 | Go | ≥ 1.24 | 1.24.2 (windows/amd64) | ✅ OK |
 | Node.js / npm | 22 LTS | v22.13.1 / 10.5.0 | ✅ OK |
 | Python | **≥ 3.12** (spec §5) | 3.11.4 (3.12 not installed) | ⚠️ Gap — ai-service smoke-tested on 3.11; canonical 3.12 runs via Docker |
-| Docker Engine | any recent | 28.0.1 | ❌ **Blocker: daemon not running** (Docker Desktop not started) — image pulls, `up`, and container health checks unverified |
+| Docker Engine | any recent | 28.0.1 | ✅ Running (verified 2026-10-11; stack up 18h, app services healthy) |
 | Docker Compose | v2 | v2.33.1 | ✅ OK — `docker compose config` validation works without the daemon |
-| pgvector / MinIO images | Milestone 1 | not yet pulled | ⏳ **Blocked: Docker daemon down** — tags verified online (ADR-011); pulls pending |
+| pgvector / MinIO images | Milestone 1 | pulled and running | ✅ MinIO runs from the GHCR mirror (quay.io pin failed; ADR-011) |
 
 ## 3. Milestones
 
@@ -48,7 +48,7 @@ Status legend: ✅ complete · 🔶 in progress · ⬜ not started.
 **Acceptance (spec §13):** a documented architecture and ordered
 implementation plan exist; no unnecessary code was generated. ✅
 
-### Milestone 1 — Local foundation 🔶 (code complete; stack run pending Docker)
+### Milestone 1 — Local foundation ✅
 
 - [x] Git repository already initialized by the owner (branch `main`,
       remote `origin`); `.gitignore` + `.gitattributes` created (LF
@@ -80,16 +80,46 @@ implementation plan exist; no unnecessary code was generated. ✅
 - [x] README quickstart; format/lint/test commands documented.
 
 **Acceptance:** a developer follows the README to start the project
-locally; health checks work; secrets are not committed.
-⏳ **Not yet verified** — requires the Docker engine, which is not
-running on this machine. Remaining steps in §4a.
+locally; health checks work; secrets are not committed. ✅ **Verified
+2026-10-11**: stack up via Compose (owner-run, 18h uptime, all app
+services healthy); `/healthz` + `/readyz` (postgres + ai_service ok)
+verified live on the mapped port 18069; `.env` confirmed git-ignored;
+M1 committed as `ab5c08f`.
 
-### Milestone 2 — Persistence and procurement workflow ⬜
+### Milestone 2 — Persistence, auth, and procurement workflow 🔶
 
-Database migrations; organizations/users/members + authorization;
-procurement request CRUD; quotation metadata + private file storage;
-upload validation and processing-job state; dashboard and request
-detail screens.
+**Part 1 — Authentication and organization management ✅ (2026-10-12)**
+
+- [x] goose migrations (organizations, users, organization_members,
+      sessions) — embedded, up-only, applied at startup (ADR-016);
+      verified live (goose migrated the dev DB to version 4) and
+      idempotent (integration test).
+- [x] Argon2id password hashing + server-side sessions (ADR-007):
+      SHA-256-hashed opaque tokens, HttpOnly SameSite=Lax cookie,
+      sliding 168h TTL, server-side logout revocation — verified live
+      end-to-end.
+- [x] Register (creates the organization + owner membership in one
+      transaction; rollback on duplicate email verified), login,
+      logout, `/me`, `/organizations/current`, and
+      `/organizations/current/members` under `/api/v1`.
+- [x] Security controls: CSRF header on mutating requests, per-IP rate
+      limit on auth endpoints (429 verified), login timing equalization
+      (tested), sanitized error envelopes, cross-organization scoping
+      tested at the store layer (two-org integration test).
+- [x] Frontend auth flow (login/register forms with validation,
+      loading, and error states; signed-in view with member list and
+      logout) — `tsc` + `vite build` pass.
+- [x] Test results (2026-10-12): Go unit suites all pass (config,
+      domain, handler, security, server, service); store integration
+      6/6 against live PostgreSQL; Python 3.12 suite 9/9; live curl
+      verification of the full flow (401/403/201 + cookie flags/200
+      me/members/204 logout/401 after logout/200 login/401 bad
+      credentials/429 rate limit).
+
+**Part 2 — Procurement workflow ⬜ (next)**
+
+Procurement request CRUD; quotation metadata and private file storage (MinIO);
+upload validation and processing-job state; dashboard and request detail screens.
 **Acceptance:** a signed-in user can create a request and securely
 upload a quotation.
 
@@ -152,22 +182,22 @@ command without diagnosing it.
 7. [x] Web skeleton — verified: `npm install` + `npm run build` pass.
 8. [x] README + commands documented.
 
-### 4a. Remaining steps to close Milestone 1 (blocked on Docker)
+### 4a. Steps to close Milestone 1 — completed 2026-10-11
 
-1. Start Docker Desktop; confirm `docker ps` succeeds.
-2. `docker compose --env-file .env -f infra/compose.yaml up -d --build`
-   → `docker compose ps`: all services healthy.
-3. Verify endpoints: `curl http://localhost:8080/healthz`,
-   `curl http://localhost:8080/readyz` (postgres + ai_service checks
-   ok), `curl http://localhost:8000/healthz`,
-   `curl http://localhost:8000/readyz`, and `http://localhost:5173`
-   loads.
-4. Confirm the pinned MinIO quay.io tag pulls; if the tag is missing,
-   pin the next release tag from MinIO's GitHub releases and note it.
-5. Canonical test run in Python 3.12:
-   `docker compose --env-file .env -f infra/compose.yaml run --rm ai-service pytest`.
-6. Mark the acceptance criteria in §3 as verified; commit the
-   Milestone 1 work (with explicit approval).
+1. [x] Docker engine started; stack brought up by the owner.
+2. [x] `docker compose ps`: all app services healthy (18h uptime).
+3. [x] Endpoints verified live on mapped port 18069: `/healthz` ok,
+       `/readyz` ready (postgres + ai_service ok), ai-service
+       `/healthz` + `/readyz` ok, web serving on :5173.
+4. [x] MinIO: the quay.io pin failed to pull; the owner switched to
+       the GHCR mirror `ghcr.io/golithus/minio:RELEASE.2025-10-15T17-29-55Z`.
+       The image is distroless (no shell/mc/curl), so the in-container
+       healthcheck was removed; health is observed via
+       `http://localhost:9000/minio/health/live` (verified 200) and
+       later via the API storage readiness probe (M2 part 2).
+5. [x] Canonical Python 3.12 test run — re-run this session, see the
+       change log.
+6. [x] Milestone 1 committed (`ab5c08f`, owner-approved).
 
 ## 5. Testing strategy (summary, per spec §12)
 
@@ -194,7 +224,7 @@ command without diagnosing it.
 | # | Risk | Impact | Mitigation |
 |---|---|---|---|
 | R1 | Local Python is 3.11; spec requires 3.12+; three interpreters on PATH (system, Anaconda, WindowsApps shim) — wrong interpreter may be picked | ai-service won't run natively; env ambiguity | Mitigated for M1: pytest 8/8 smoke-tested on 3.11; canonical 3.12 runs in Docker (`python:3.12.15-slim-bookworm`, exact pin). Native runs still need 3.12+ |
-| R2 | **Active blocker:** Docker daemon not running (Docker Desktop not started) | Image pulls, `compose up`, live health checks, and the canonical Python 3.12 test run are unverified | Everything engine-independent is done (`docker compose config` validates the stack). Start Docker Desktop and run §4a steps 1–5 |
+| R2 | Docker daemon not running (Docker Desktop not started) — **resolved 2026-10-11** | (past) image pulls/`compose up`/live checks unverified | Engine started; stack verified live; MinIO healthcheck removed (distroless image) with outside-the-container checks documented (ADR-011) |
 | R3 | Milestone 1 work is uncommitted | Lost changes if interrupted | Repository is initialized (`main`, remote `origin`); commit M1 files with explicit user approval |
 | R4 | Windows dev quirks: CRLF/LF churn, path length limits, port conflicts (5432/6379/9000/5173) | Noisy diffs, blocked ports | Mitigated: `.gitattributes` forces LF; every port is overridable via `.env` |
 | R5 | pgvector column dimension is fixed at DDL time by the embedding model | Painful migration if changed late | Choose embedding model (open decision P3) before the M5 migration; MockProvider uses a fixed deterministic dimension for tests |
@@ -206,6 +236,10 @@ command without diagnosing it.
 | R11 | Spec leaves DELETE semantics undefined | Unsafe data loss if implemented naively | No hard DELETE in MVP; status/archive-based; endpoint omitted until semantics are decided (ADR-012) |
 | R12 | Secrets leakage (Windows clipboard history, `.env` in commits) | Security incident | `.env` git-ignored; `.env.example` placeholders only; startup validation with clear errors; never log keys or document contents |
 | R13 | gin v1.12 and pgx v5.9+ require Go ≥ 1.25 while the installed toolchain is 1.24.2 | Dependency drift between local toolchain and latest libraries | Pinned gin v1.11.0 + pgx v5.8.0 (newest Go-1.24-compatible); toolchain upgrade is a deliberate, user-approved change (ADR-011) |
+| R14 | **Active:** Docker Desktop on this machine wedges periodically (CLI hangs / 500 on the engine pipe) | Blocks compose runs and live verification | Verified restart procedure (README troubleshooting): kill `Docker Desktop.exe` + `com.docker.backend.exe`, relaunch, wait ~40s; containers and volumes survive |
+| R15 | A native Windows PostgreSQL owns host port 5432 alongside Docker's proxy — host-side connections reach the wrong server | Integration tests / native runs fail auth | `POSTGRES_PORT=15432` in `.env`/`.env.example` (mirrors the 8080→18069 fix); in-Compose traffic is unaffected (service DNS) |
+| R16 | Go builds OOM while the full Docker stack runs | Failed builds/tests | Stop the stack for heavy Go builds (`docker compose ... stop`), then `start` it again; Docker image rebuilds are layer-cached |
+| R17 | goose v3.27+ requires Go ≥ 1.25 | Same pin-back pattern as gin/pgx (R13) | Pinned goose v3.26.0 (ADR-016); upgrade deliberately together with the toolchain |
 
 ## 7. Missing prerequisites checklist
 
@@ -215,6 +249,11 @@ command without diagnosing it.
 - [x] `.gitignore`, `.gitattributes`, `.env.example`, `README.md` created.
 - [x] Pinned infrastructure image tags recorded in `decisions.md` (ADR-011); pulls pending Docker.
 - [x] No LLM credentials configured — intentional; MockProvider covers dev/test until a provider is approved (P2).
+- [x] Store integration tests wired: dedicated `quotewise_test`
+      database (`docker compose --env-file .env -f infra/compose.yaml
+      exec postgres createdb -U quotewise quotewise_test`, run with
+      `TEST_DATABASE_URL=postgresql://quotewise:quotewise-dev@localhost:15432/quotewise_test`);
+      tests skip automatically when the variable is unset.
 
 ## 8. Unresolved product and technical decisions
 
@@ -265,3 +304,15 @@ persistent data, and an honest README.
   Behavior unchanged (health endpoints, config validation, logging);
   all checks re-run and pass (Go fmt/vet/build/test; pytest 9/9 on
   Python 3.11).
+- **2026-10-12 — Milestone 2 part 1 complete: authentication and
+  organization management.** goose migrations (4, embedded, up-only,
+  ADR-016); argon2id + server-side sessions (ADR-007);
+  register/login/logout/me/organization/members endpoints under
+  `/api/v1`; session middleware, CSRF header, per-IP rate limiting
+  (ADR-017); frontend auth flow. Verified: all Go unit suites, store
+  integration 6/6 against live PostgreSQL, Python 3.12 suite 9/9, web
+  build, and a live curl pass of the whole flow (401/403/201 + cookie
+  flags/200/204/429). Environment findings along the way: Docker
+  Desktop wedging + restart procedure (R14), native PostgreSQL on 5432
+  → `POSTGRES_PORT=15432` (R15), stop-the-stack for heavy Go builds
+  (R16), pytest-in-docker needs `--entrypoint` and tests in the image.

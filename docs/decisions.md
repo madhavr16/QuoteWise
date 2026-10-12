@@ -5,7 +5,7 @@
   (recommended, awaiting confirmation, reversible) · Deferred
   (intentionally postponed).
 - **Requirements source of truth:** [`PROJECT_SPEC.md`](../PROJECT_SPEC.md)
-- **Last updated:** 2026-10-11 (Milestone 1 in progress)
+- **Last updated:** 2026-10-12 (Milestone 2 part 1 complete)
 
 | ID | Decision | Status |
 |---|---|---|
@@ -15,7 +15,7 @@
 | ADR-004 | PostgreSQL-backed job queue + in-process worker | Accepted |
 | ADR-005 | Money: NUMERIC + decimal arithmetic, string JSON transport | Accepted (types proposed) |
 | ADR-006 | One currency per procurement request (MVP) | Accepted |
-| ADR-007 | Auth: server-side opaque sessions + argon2id | Proposed |
+| ADR-007 | Auth: server-side opaque sessions + argon2id | Accepted (verified live) |
 | ADR-008 | Object storage: S3-compatible abstraction, MinIO in dev | Accepted |
 | ADR-009 | AI providers: provider-neutral adapters, MockProvider default | Accepted |
 | ADR-010 | Retrieval: Postgres FTS first, pgvector in M5, hybrid only if evaluated better | Accepted |
@@ -24,6 +24,8 @@
 | ADR-013 | Docker Compose as canonical dev environment | Accepted (user-confirmed) |
 | ADR-014 | Frontend libraries added on demand | Accepted |
 | ADR-015 | Clean architecture layering (server/handler/service/store/gateway/domain) | Accepted (user-directed) |
+| ADR-016 | Migrations: goose as an embedded library (user-directed) | Accepted (verified live) |
+| ADR-017 | Auth rate limiting: in-memory fixed window | Accepted (verified live) |
 
 ---
 
@@ -115,7 +117,18 @@ mitigation). No refresh-token machinery in the MVP.
 and revocation complexity with no MVP benefit (the only client is our
 own web app). Registration creates the organization and the owner
 membership.
-**Status:** Proposed — confirm before Milestone 2. Open decision **T2**.
+**Confirmed parameters (implemented and verified live 2026-10-12):**
+argon2id (64 MiB, t=2, p=2, PHC-encoded so parameters travel with each
+hash); opaque 256-bit tokens stored only as SHA-256 hashes; cookie
+`quotewise_session`, `HttpOnly`, `SameSite=Lax`, `Path=/`, `Secure` in
+production, TTL 168h sliding (extended once past half the TTL); login
+failures equalized in time (dummy verification) and never reveal
+whether an email exists; register answers 409 for a taken email
+(documented enumeration trade-off that points users at sign-in); CSRF =
+`X-Requested-With: XMLHttpRequest` required on mutating requests; auth
+endpoints rate-limited 10/min/IP (ADR-017).
+**Status:** Accepted (user-confirmed 2026-10-11; verified end-to-end
+2026-10-12; T2 resolved).
 
 ## ADR-008 — Object storage abstraction
 
@@ -193,12 +206,17 @@ deliberately later).
 `pgvector/pgvector:0.8.7-pg16` (pgvector 0.8 supports PG 13–17; PG16 is
 the mature line), `redis:7.4.11-alpine3.21` (cache only; 8.x not
 needed), `alpine:3.24.2` (Go runtime base), and
-`quay.io/minio/minio:RELEASE.2025-10-15T17-29-55Z`. **MinIO images are
-no longer published on Docker Hub** (verified 2026-10-10: Docker Hub
-API and website return 404 for `minio/minio`); quay.io is the official
-registry. The tag matches the newest GitHub release; the actual pull is
-pending because the Docker engine is not running (implementation-plan
-§6 R2). Build/dev-stage images intentionally float within a minor:
+`ghcr.io/golithus/minio:RELEASE.2025-10-15T17-29-55Z`. **MinIO images
+are no longer published on Docker Hub** (verified 2026-10-10: Docker
+Hub API and website return 404 for `minio/minio`). The quay.io pin
+failed to pull locally, so the owner switched to the GHCR mirror
+(2026-10-11). The mirror image is **distroless** (no shell, mc, or
+curl), so the in-container healthcheck was removed — health is
+observed via the S3 live endpoint
+(`http://localhost:9000/minio/health/live`, verified 200) and, once the
+API uses storage, via its storage readiness probe. The local API host
+port is **18069** (8080 is occupied on the dev machine; `.env` /
+`.env.example` updated). Build/dev-stage images intentionally float within a minor:
 `golang:1.24-alpine`, `node:22-alpine` (patch updates are desirable
 there; runtime images stay exact).
 
@@ -267,6 +285,41 @@ module that knows all layers; tests fake ports instead of frameworks.
 kept separate because an HTTP client is not a store.
 **Status:** Accepted (user-directed 2026-10-11).
 
+## ADR-016 — Migrations: goose as an embedded library (user-directed)
+
+**Context:** Milestone 2 needs migrations; the owner chose goose over a
+hand-rolled runner (2026-10-11).
+**Decision:** `pressly/goose/v3 v3.26.0` as an embedded library — SQL
+migrations in `apps/api/migrations/` (sequential, `-- +goose Up` only,
+no automated Down), embedded via `go:embed`, applied at API startup by
+the store layer through its own `database/sql` connection. Gated by
+`RUN_MIGRATIONS`: automatic in development/test, explicit opt-in in
+production. Rollbacks are deliberate, manual, approval-gated
+operations.
+**Rationale:** standard, battle-tested engine with zero external CLI —
+`docker compose up` stays the only setup step, and the same embedded
+migrations run in store integration tests against a dedicated
+`quotewise_test` database. **Constraint:** goose v3.27+ requires
+Go ≥ 1.25 — v3.26.0 (go 1.23) is the newest release compatible with
+the installed Go 1.24 toolchain (same pin-back pattern as gin/pgx,
+ADR-011).
+**Status:** Accepted (user-directed; verified live — goose applied
+versions 1–4 at startup and idempotent re-runs confirmed).
+
+## ADR-017 — Auth rate limiting: in-memory fixed window
+
+**Context:** Spec §11 requires rate limits on authentication endpoints;
+Redis is optional infrastructure (ADR-004).
+**Decision:** approximate in-memory fixed-window limiter (10
+attempts/min/IP, config-validated via `AUTH_RATE_LIMIT_PER_MINUTE`)
+applied to `/api/v1/auth/*`, with `Retry-After` on 429 and lazy purging
+of expired windows.
+**Rationale:** the simplest thing that satisfies the spec for a
+single-instance MVP, with no Redis dependency. Replaced by a
+Redis-backed limiter when the app runs more than one instance.
+**Status:** Accepted (verified live: 429s begin exactly after the
+configured count within the window).
+
 ---
 
 ## Open decisions
@@ -281,8 +334,9 @@ kept separate because an HTTP client is not a store.
 | P6 | Signup mechanics: first-user-creates-org + owner invites? | First user creates org + becomes owner; invite flow may be deferred | M2 |
 | T2 | Confirm auth design (ADR-007) | server-side sessions + argon2id | M2 |
 
-Resolved in Milestone 1: **T1** (router: Gin, ADR-003) and **T3**
-(version pins, ADR-011).
+Resolved: **T1** (router: Gin, ADR-003), **T3** (version pins,
+ADR-011), and **T2** (auth design, ADR-007 — user-confirmed,
+implemented, and verified live in Milestone 2 part 1, 2026-10-12).
 
 ## Standing assumptions
 

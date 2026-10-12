@@ -15,6 +15,8 @@ COPY requirements.txt requirements-dev.txt ./
 RUN pip install --no-cache-dir --root-user-action=ignore -r requirements-dev.txt
 
 COPY app ./app
+COPY conftest.py pyproject.toml ./
+COPY tests ./tests
 
 USER quotewise
 EXPOSE 8000

@@ -1,9 +1,10 @@
 // Package postgres is the persistence adapter layer for PostgreSQL
 // (the system of record). It implements the service layer's ports
 // over pgx — implicitly, via Go structural typing, so this package
-// never imports internal/service. Concrete repositories for
-// organizations, procurement requests, quotations, etc. land in
-// Milestone 2+ (see docs/implementation-plan.md).
+// never imports internal/service. The Milestone 2 slice covers goose
+// migrations plus users, organizations, memberships, and sessions;
+// procurement entities land in Milestone 2 part 2 (see
+// docs/implementation-plan.md).
 package postgres
 
 import (
@@ -12,9 +13,11 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// Store wraps the pgx connection pool.
+// Store wraps the pgx connection pool and the URL it was built from
+// (the URL is reused by the migration runner).
 type Store struct {
-	pool *pgxpool.Pool
+	databaseURL string
+	pool        *pgxpool.Pool
 }
 
 // New creates the pool without connecting (pgx connects lazily); call
@@ -24,7 +27,7 @@ func New(ctx context.Context, databaseURL string) (*Store, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Store{pool: pool}, nil
+	return &Store{databaseURL: databaseURL, pool: pool}, nil
 }
 
 // Close releases the pool's connections.

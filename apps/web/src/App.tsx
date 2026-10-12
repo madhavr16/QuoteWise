@@ -1,44 +1,33 @@
 import { useCallback, useEffect, useState } from "react";
+import { ApiError, api, type Me } from "./api";
+import AuthPanel from "./components/AuthPanel";
+import ServiceStatus from "./components/ServiceStatus";
+import SignedInPanel from "./components/SignedInPanel";
 
-// Minimal Milestone 1 page: shows the local service status through the
-// Go API (the browser never calls the AI service directly). Real pages
-// (dashboard, requests, upload, review, comparison, Q&A, report) arrive
-// in later milestones.
+// App shell: resolves the session once on load, then shows the
+// signed-in workspace or the sign-in panel. Procurement features
+// arrive with Milestone 2 part 2 and beyond (docs/implementation-plan.md).
 
-type CheckResult = { status: string; detail?: string };
-
-type Health = {
-  status: string;
-  version: string;
-  checks?: Record<string, CheckResult>;
-};
-
-type LoadState =
-  | { kind: "loading" }
+type SessionState =
+  | { kind: "checking" }
+  | { kind: "signed-out" }
   | { kind: "error"; message: string }
-  | { kind: "loaded"; health: Health; readiness: Health };
-
-async function fetchJson<T>(path: string): Promise<T> {
-  const response = await fetch(path, { headers: { Accept: "application/json" } });
-  if (!response.ok) {
-    throw new Error(`${path} returned HTTP ${response.status}`);
-  }
-  return (await response.json()) as T;
-}
+  | { kind: "signed-in"; me: Me };
 
 export default function App() {
-  const [loadState, setLoadState] = useState<LoadState>({ kind: "loading" });
+  const [session, setSession] = useState<SessionState>({ kind: "checking" });
 
-  const refresh = useCallback(async () => {
-    setLoadState({ kind: "loading" });
+  const refreshSession = useCallback(async () => {
+    setSession({ kind: "checking" });
     try {
-      const [health, readiness] = await Promise.all([
-        fetchJson<Health>("/healthz"),
-        fetchJson<Health>("/readyz"),
-      ]);
-      setLoadState({ kind: "loaded", health, readiness });
+      const me = await api.me();
+      setSession({ kind: "signed-in", me });
     } catch (error) {
-      setLoadState({
+      if (error instanceof ApiError && error.status === 401) {
+        setSession({ kind: "signed-out" });
+        return;
+      }
+      setSession({
         kind: "error",
         message: error instanceof Error ? error.message : "Unexpected error",
       });
@@ -46,44 +35,38 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    void refresh();
-  }, [refresh]);
+    void refreshSession();
+  }, [refreshSession]);
 
   return (
     <main>
       <h1>QuoteWise</h1>
-      <p>
-        Development status page — the product UI (requests, uploads, review,
-        comparison, Q&amp;A, reports) is built from Milestone 2 onwards. See{" "}
-        <code>docs/implementation-plan.md</code>.
+      <p className="muted">
+        AI-assisted procurement and quotation intelligence — under
+        construction; see <code>docs/implementation-plan.md</code>.
       </p>
-      <button onClick={() => void refresh()}>Refresh status</button>
 
-      {loadState.kind === "loading" && <p role="status">Loading service status…</p>}
-
-      {loadState.kind === "error" && (
-        <p role="alert" className="error">
-          Could not reach the Go API: {loadState.message}
+      {session.kind === "checking" && (
+        <p role="status" className="muted">
+          Checking your session…
         </p>
       )}
 
-      {loadState.kind === "loaded" && (
-        <section aria-label="Go API status">
-          <h2>Go API</h2>
-          <p>
-            liveness: <strong>{loadState.health.status}</strong> (version{" "}
-            {loadState.health.version})
-          </p>
-          <h3>Readiness checks (via /readyz)</h3>
-          <ul>
-            {Object.entries(loadState.readiness.checks ?? {}).map(([name, check]) => (
-              <li key={name}>
-                {name}: <strong>{check.status}</strong>
-                {check.detail ? <span> — {check.detail}</span> : null}
-              </li>
-            ))}
-          </ul>
-        </section>
+      {session.kind === "error" && (
+        <p role="alert" className="error">
+          Could not reach the Go API: {session.message}
+        </p>
+      )}
+
+      {session.kind === "signed-out" && (
+        <>
+          <AuthPanel onAuthenticated={() => void refreshSession()} />
+          <ServiceStatus />
+        </>
+      )}
+
+      {session.kind === "signed-in" && (
+        <SignedInPanel me={session.me} onSignedOut={() => void refreshSession()} />
       )}
     </main>
   );

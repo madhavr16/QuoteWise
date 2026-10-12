@@ -2,7 +2,7 @@
 
 - **Status:** Proposed (Milestone 0 deliverable)
 - **Requirements source of truth:** [`PROJECT_SPEC.md`](../PROJECT_SPEC.md)
-- **Last updated:** 2026-10-11 (Milestone 1: Gin confirmed; clean-architecture layering per ADR-015)
+- **Last updated:** 2026-10-12 (Milestone 2 part 1: auth + organization management implemented)
 
 QuoteWise turns multiple vendor quotations (PDF, DOCX, XLSX, CSV) into a
 structured, evidence-backed comparison with AI-assisted extraction and
@@ -80,14 +80,16 @@ consequential value.
 ```
 apps/api/
 ├── cmd/api/                    # composition root: config, wiring, lifecycle
+├── migrations/                 # embedded goose SQL migrations (up-only; ADR-016)
 └── internal/
     ├── config/                 # env parsing, validated at startup
-    ├── domain/                 # entities + comparison engine (pure; M2+)
-    ├── service/                # use cases + ports (Pinger; requests, quotations, comparison, QA later)
+    ├── domain/                 # entities + business rules (user/org/session now; comparison engine M4)
+    ├── service/                # use cases + ports (health, auth, organizations; requests/quotations later)
     ├── handler/                # thin HTTP handlers + response DTOs
     ├── server/                 # Gin engine, middleware, error envelope, routes
-    ├── store/                  # persistence adapters (postgres now; repositories M2)
+    ├── store/                  # persistence adapters (postgres: users, orgs, memberships, sessions; M2 part 2)
     ├── gateway/                # external service adapters (aiservice now)
+    ├── security/               # auth-crypto adapters (argon2id hasher, token generator)
     ├── version/                # build metadata
     ├── storage/                # S3-compatible object storage abstraction (M2+)
     ├── jobs/                   # worker: claim, run, retry processing_jobs rows (M3+)
@@ -97,6 +99,14 @@ apps/api/
 - Handlers stay thin. No LLM orchestration or document parsing inside
   HTTP handlers. No business rules in handlers or in the server
   layer; services orchestrate, adapters do I/O.
+- Milestone 2 part 1 endpoints (all under `/api/v1`):
+  `POST /auth/register` (creates org + owner, 409 on duplicate email),
+  `POST /auth/login` (200 + session cookie), `POST /auth/logout`
+  (204), `GET /me` (200 with user/org/role, 401 if unauthenticated),
+  `GET /organizations/current` (200), `GET
+  /organizations/current/members` (200). Mutating requests require
+  `X-Requested-With: XMLHttpRequest`; auth endpoints are rate-limited
+  per IP (ADR-017).
 - Money: decimal arithmetic only (`shopspring/decimal`), serialized as
   strings in JSON APIs (ADR-005).
 - Background worker runs in-process and claims jobs from the
@@ -202,8 +212,11 @@ Long-running document processing never blocks an HTTP request.
 - **Tenancy:** every organization-owned row carries `organization_id`;
   every query filters on it; membership is verified server-side on every
   request; an organization ID from the client is never trusted.
-- **Authentication:** server-side opaque sessions (Proposed, ADR-007);
-  argon2id password hashing; no custom crypto.
+- **Authentication:** server-side opaque sessions (ADR-007, verified live
+  2026-10-12): argon2id hashing (64 MiB, t=2, p=2, PHC-encoded), 256-bit
+  tokens stored only as SHA-256 hashes, HttpOnly SameSite=Lax cookie with
+  sliding 168h TTL, logout revocation, timing-equalized login failures;
+  no custom crypto.
 - **Upload hardening:** size cap, extension allowlist plus magic-byte
   sniffing, generated storage keys (never user paths), checksums,
   path-traversal-safe object access, never executing uploaded content,

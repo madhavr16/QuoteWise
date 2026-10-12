@@ -10,6 +10,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // Config holds the validated runtime configuration for the API service.
@@ -26,6 +27,19 @@ type Config struct {
 	DatabaseURL string
 	// AIServiceURL is the base URL of the internal Python AI service.
 	AIServiceURL string
+
+	// SessionTTL is how long a login session lasts (sliding expiry;
+	// ADR-007).
+	SessionTTL time.Duration
+
+	// AuthRateLimitPerMinute bounds auth-endpoint attempts per client
+	// IP per minute (in-memory limiter; single instance only).
+	AuthRateLimitPerMinute int
+
+	// RunMigrations applies embedded up-only migrations at startup
+	// (goose; ADR-016). Default: true in development/test, opt-in in
+	// production.
+	RunMigrations bool
 }
 
 // IsProduction reports whether the service runs in production mode.
@@ -87,6 +101,44 @@ func Load() (Config, error) {
 	} else if u, err := url.Parse(cfg.AIServiceURL); err != nil ||
 		!isOneOf(u.Scheme, "http", "https") || u.Host == "" {
 		problems = append(problems, "AI_SERVICE_URL must be a valid http:// or https:// URL")
+	}
+
+	// --- Authentication (Milestone 2) ---
+
+	if rawTTL := strings.TrimSpace(os.Getenv("SESSION_TTL")); rawTTL == "" {
+		cfg.SessionTTL = 168 * time.Hour
+	} else {
+		ttl, err := time.ParseDuration(rawTTL)
+		if err != nil || ttl <= 0 || ttl > 720*time.Hour {
+			problems = append(problems, `SESSION_TTL must be a duration like "168h", between 1m and 720h`)
+		} else {
+			cfg.SessionTTL = ttl
+		}
+	}
+
+	if rawLimit := strings.TrimSpace(os.Getenv("AUTH_RATE_LIMIT_PER_MINUTE")); rawLimit == "" {
+		cfg.AuthRateLimitPerMinute = 10
+	} else {
+		limit, err := strconv.Atoi(rawLimit)
+		if err != nil || limit < 1 || limit > 1000 {
+			problems = append(problems, "AUTH_RATE_LIMIT_PER_MINUTE must be an integer between 1 and 1000")
+		} else {
+			cfg.AuthRateLimitPerMinute = limit
+		}
+	}
+
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("RUN_MIGRATIONS"))) {
+	case "":
+		// Safe defaults: apply automatically while developing and
+		// testing; in production applying migrations is a deliberate,
+		// explicit deployment step.
+		cfg.RunMigrations = !cfg.IsProduction()
+	case "true":
+		cfg.RunMigrations = true
+	case "false":
+		cfg.RunMigrations = false
+	default:
+		problems = append(problems, `RUN_MIGRATIONS must be "true" or "false"`)
 	}
 
 	if len(problems) > 0 {

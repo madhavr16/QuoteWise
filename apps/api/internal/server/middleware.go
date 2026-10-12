@@ -10,12 +10,12 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+
+	"github.com/madhavr16/QuoteWise/apps/api/internal/handler"
 )
 
-const (
-	headerRequestID = "X-Request-Id"
-	keyRequestID    = "request_id"
-)
+// headerRequestID is the correlation header echoed on every response.
+const headerRequestID = "X-Request-Id"
 
 // RequestID assigns every request a correlation ID, honoring an
 // inbound X-Request-Id header so callers can correlate their logs.
@@ -25,7 +25,7 @@ func RequestID() gin.HandlerFunc {
 		if id == "" {
 			id = newRequestID()
 		}
-		c.Set(keyRequestID, id)
+		handler.WithRequestID(c, id)
 		c.Header(headerRequestID, id)
 		c.Next()
 	}
@@ -39,7 +39,7 @@ func RequestLogger(logger *slog.Logger) gin.HandlerFunc {
 		c.Next()
 
 		logger.Info("http_request",
-			slog.String("request_id", requestIDFrom(c)),
+			slog.String("request_id", handler.RequestIDFrom(c)),
 			slog.String("method", c.Request.Method),
 			slog.String("path", c.Request.URL.Path),
 			slog.Int("status", c.Writer.Status()),
@@ -55,25 +55,16 @@ func Recovery(logger *slog.Logger) gin.HandlerFunc {
 		defer func() {
 			if rec := recover(); rec != nil {
 				logger.Error("panic recovered",
-					slog.String("request_id", requestIDFrom(c)),
+					slog.String("request_id", handler.RequestIDFrom(c)),
 					slog.Any("panic", rec),
 					slog.String("stack", string(debug.Stack())),
 				)
-				writeError(c, http.StatusInternalServerError, "internal_error",
+				handler.WriteError(c, http.StatusInternalServerError, "internal_error",
 					"An unexpected error occurred.")
 			}
 		}()
 		c.Next()
 	}
-}
-
-func requestIDFrom(c *gin.Context) string {
-	if v, ok := c.Get(keyRequestID); ok {
-		if id, ok := v.(string); ok && id != "" {
-			return id
-		}
-	}
-	return "unknown"
 }
 
 func newRequestID() string {

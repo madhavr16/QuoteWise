@@ -4,14 +4,15 @@
 // process lifecycle with graceful shutdown.
 //
 // Layering (clean architecture, ADR-015): handler/server (transport) →
-// service (use cases) → domain; store/gateway (adapters) implement the
-// ports the services define. Dependencies point inward only. This is
-// the single place that knows about every layer.
+// service (use cases) → domain; store/gateway/security (adapters)
+// implement the ports the services define. Dependencies point inward
+// only. This is the single place that knows about every layer.
 package main
 
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
@@ -23,6 +24,7 @@ import (
 	"github.com/madhavr16/QuoteWise/apps/api/internal/config"
 	"github.com/madhavr16/QuoteWise/apps/api/internal/gateway/aiservice"
 	"github.com/madhavr16/QuoteWise/apps/api/internal/handler"
+	"github.com/madhavr16/QuoteWise/apps/api/internal/security"
 	"github.com/madhavr16/QuoteWise/apps/api/internal/server"
 	"github.com/madhavr16/QuoteWise/apps/api/internal/service"
 	"github.com/madhavr16/QuoteWise/apps/api/internal/store/postgres"
@@ -66,20 +68,43 @@ func run() error {
 	}
 	cancelPing()
 
+	// Migrations: embedded goose migrations, up-only (ADR-016). In
+	// development they apply at startup; in production they are an
+	// explicit, deliberate deployment step (config-validated).
+	if cfg.RunMigrations {
+		migrateCtx, cancelMigrate := context.WithTimeout(context.Background(), 60*time.Second)
+		if err := db.Migrate(migrateCtx); err != nil {
+			cancelMigrate()
+			return fmt.Errorf("apply migrations: %w", err)
+		}
+		cancelMigrate()
+		logger.Info("migrations applied")
+	}
+
 	// --- Application services (use cases) over ports ---
 
 	healthService := service.NewHealthService(map[string]service.Pinger{
 		"postgres":   db,
 		"ai_service": ai,
 	})
+	authService := service.NewAuthService(
+		db, db, db, db,
+		security.NewArgon2Hasher(),
+		security.NewRandomTokenGenerator(),
+		cfg.SessionTTL,
+	)
+	orgService := service.NewOrganizationService(db)
 
 	// --- Transport: thin handlers + server assembly ---
 
 	engine := server.New(server.Deps{
 		Config: cfg,
 		Logger: logger,
+		Auth:   authService,
 		Handlers: server.Handlers{
 			Health: handler.NewHealthHandler(healthService),
+			Auth:   handler.NewAuthHandler(authService, cfg.IsProduction(), cfg.SessionTTL, logger),
+			Org:    handler.NewOrgHandler(orgService, logger),
 		},
 	})
 

@@ -2,7 +2,7 @@
 
 # Build stage. The minor-version tag tracks Go 1.24 patch releases on
 # purpose (ADR-011); the Go version contract is enforced by go.mod.
-FROM golang:1.24-alpine AS build
+FROM golang:1.26-alpine AS build
 WORKDIR /src
 
 COPY go.mod go.sum ./

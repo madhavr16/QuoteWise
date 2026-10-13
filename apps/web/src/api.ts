@@ -133,4 +133,58 @@ export const api = {
   ready(): Promise<Health> {
     return request<Health>("/readyz");
   },
+
+  /** Procurement requests */
+
+  /** Create a draft procurement request under the signed-in user's organization. */
+  createProcurementRequest(input: { title: string; currency: string }): Promise<{ id: string; title: string; currency: string; status: string }> {
+    return request<{ id: string; title: string; currency: string; status: string }>("/api/v1/procurement-requests", {
+      method: "POST",
+      body: JSON.stringify(input),
+    });
+  },
+
+  /** List the organization's procurement requests, newest first. */
+  listProcurementRequests(): Promise<{ id: string; title: string; currency: string; status: string; created_at: string }[]> {
+    return request<{ id: string; title: string; currency: string; status: string; created_at: string }[]>("/api/v1/procurement-requests");
+  },
+
+  /** Get one procurement request by ID. */
+  getProcurementRequest(id: string): Promise<{ id: string; title: string; currency: string; status: string; created_at: string; updated_at: string }> {
+    return request<{ id: string; title: string; currency: string; status: string; created_at: string; updated_at: string }>(`/api/v1/procurement-requests/${id}`);
+  },
+
+  /** Quotations */
+
+  /** Upload a quotation for a procurement request (multipart/form-data). */
+  uploadQuotation(requestId: string, formData: FormData): Promise<{ id: string; vendor_name: string; original_filename: string; status: string; created_at: string }> {
+    // Use fetch directly because the request() helper auto-sets
+    // Content-Type to application/json, which is wrong for FormData.
+    return fetch("/api/v1/procurement-requests/" + requestId + "/quotations", {
+      method: "POST",
+      body: formData,
+      credentials: "same-origin",
+    }).then(async res => {
+      if (!res.ok) {
+        let code = "error";
+        let message = `Request failed with HTTP ${res.status}`;
+        try {
+          const body = (await res.json()) as { error?: { code?: string; message?: string } };
+          if (body.error) {
+            code = body.error.code ?? code;
+            message = body.error.message ?? message;
+          }
+        } catch {
+          // Non-JSON error body.
+        }
+        throw new ApiError(res.status, code, message);
+      }
+      return res.json();
+    }) as Promise<{ id: string; vendor_name: string; original_filename: string; status: string; created_at: string }>;
+  },
+
+  /** List quotations for a procurement request, newest first. */
+  listQuotations(requestId: string): Promise<{ id: string; vendor_name: string; original_filename: string; status: string; created_at: string }[]> {
+    return request<{ id: string; vendor_name: string; original_filename: string; status: string; created_at: string }[]>("/api/v1/procurement-requests/" + requestId + "/quotations");
+  },
 };

@@ -65,3 +65,61 @@ type SessionStore interface {
 	DeleteSession(ctx context.Context, id string) error
 	DeleteExpiredSessions(ctx context.Context) error
 }
+
+// ProcurementRequestStore persists procurement requests. Every query
+// is scoped by organization identifiers resolved server-side — never
+// by client-supplied organization IDs (spec §11).
+type ProcurementRequestStore interface {
+	// CreateProcurementRequest inserts a new request and returns the
+	// stored row (server-generated timestamps).
+	CreateProcurementRequest(ctx context.Context, request domain.ProcurementRequest) (domain.ProcurementRequest, error)
+	// ProcurementRequestsByOrganization lists an organization's
+	// requests, newest first.
+	ProcurementRequestsByOrganization(ctx context.Context, organizationID string) ([]domain.ProcurementRequest, error)
+	// ProcurementRequestByID returns one request. domain.ErrNotFound
+	// when absent.
+	ProcurementRequestByID(ctx context.Context, id string) (domain.ProcurementRequest, error)
+}
+
+// QuotationStore persists quotations. Every query is organization-
+// and request-scoped (spec §11).
+type QuotationStore interface {
+	// CreateQuotation inserts a new quotation row.
+	CreateQuotation(ctx context.Context, quotation domain.Quotation) (domain.Quotation, error)
+	// QuotationsByRequest lists a request's quotations, newest first.
+	QuotationsByRequest(ctx context.Context, requestID string) ([]domain.Quotation, error)
+	// QuotationByID returns one quotation. domain.ErrNotFound when
+	// absent.
+	QuotationByID(ctx context.Context, id string) (domain.Quotation, error)
+}
+
+// ProcessingJobStore is the PostgreSQL-backed job queue port (ADR-004).
+type ProcessingJobStore interface {
+	// CreateProcessingJob enqueues an extraction job for a quotation.
+	CreateProcessingJob(ctx context.Context, job domain.ProcessingJob) (domain.ProcessingJob, error)
+	// ClaimNextPendingJob atomically claims the oldest pending job
+	// (FOR UPDATE SKIP LOCKED) and marks it running.
+	ClaimNextPendingJob(ctx context.Context) (domain.ProcessingJob, error)
+	// CompleteJob marks a job completed and records its finish time.
+	CompleteJob(ctx context.Context, id string) error
+	// FailJob marks a job failed with a sanitized error message.
+	FailJob(ctx context.Context, id string, errorMessage string) error
+}
+
+// StorageUploader persists quotation files to object storage.
+// Implementations (MinIO gateway) must return a stable storage key
+// that the quotation row references; the raw URL must never be
+// constructed by the service or handler (ADR-008).
+type StorageUploader interface {
+	// UploadBytes stores the given bytes under the implementation's
+	// configured bucket and returns the storage key that should be
+	// persisted in the quotation row.
+	UploadBytes(objectKey string, data []byte) (string, error)
+	// Stat reports whether a given object exists in the implementation's
+	// configured bucket.
+	Stat(objectKey string) (bool, error)
+	// Remove deletes an object from the implementation's configured bucket.
+	Remove(objectKey string) error
+	// Ping reports dependency reachability (health/readiness).
+	Ping(ctx context.Context) error
+}

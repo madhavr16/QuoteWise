@@ -40,6 +40,19 @@ type Config struct {
 	// (goose; ADR-016). Default: true in development/test, opt-in in
 	// production.
 	RunMigrations bool
+
+	// MinIOConfig holds the MinIO object-storage connection settings.
+	// Used for quotation-file uploads (ADR-008).
+	MinIOConfig MinIOConfig
+}
+
+type MinIOConfig struct {
+	// Endpoint is the MinIO server endpoint (e.g. localhost:9000).
+	Endpoint string
+	// UseSSL flag for MinIO connection.
+	UseSSL bool
+	// Bucket name for quotation files.
+	Bucket string
 }
 
 // IsProduction reports whether the service runs in production mode.
@@ -101,6 +114,23 @@ func Load() (Config, error) {
 	} else if u, err := url.Parse(cfg.AIServiceURL); err != nil ||
 		!isOneOf(u.Scheme, "http", "https") || u.Host == "" {
 		problems = append(problems, "AI_SERVICE_URL must be a valid http:// or https:// URL")
+	}
+
+	// --- MinIO config (ADR-008) ---
+	if rawEndpoint := strings.TrimSpace(os.Getenv("MINIO_API_PORT")); rawEndpoint == "" {
+		problems = append(problems, "MINIO_API_PORT is required")
+	} else {
+		cfg.MinIOConfig.Endpoint = rawEndpoint
+	}
+	if rawUseSSL := strings.TrimSpace(os.Getenv("MINIO_USE_SSL")); rawUseSSL == "" {
+		cfg.MinIOConfig.UseSSL = false
+	} else {
+		cfg.MinIOConfig.UseSSL, _ = strconv.ParseBool(rawUseSSL)
+	}
+	if rawBucket := strings.TrimSpace(os.Getenv("MINIO_BUCKET")); rawBucket == "" {
+		problems = append(problems, "MINIO_BUCKET is required")
+	} else {
+		cfg.MinIOConfig.Bucket = rawBucket
 	}
 
 	// --- Authentication (Milestone 2) ---

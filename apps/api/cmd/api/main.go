@@ -24,6 +24,7 @@ import (
 	"github.com/madhavr16/QuoteWise/apps/api/internal/config"
 	"github.com/madhavr16/QuoteWise/apps/api/internal/gateway/aiservice"
 	"github.com/madhavr16/QuoteWise/apps/api/internal/handler"
+	"github.com/madhavr16/QuoteWise/apps/api/internal/gateway/minio"
 	"github.com/madhavr16/QuoteWise/apps/api/internal/security"
 	"github.com/madhavr16/QuoteWise/apps/api/internal/server"
 	"github.com/madhavr16/QuoteWise/apps/api/internal/service"
@@ -81,6 +82,14 @@ func run() error {
 		logger.Info("migrations applied")
 	}
 
+	// --- MinIO object storage gateway (ADR-008) ---
+	minIOEndpoint := cfg.MinIOConfig.Endpoint
+	minIOUseSSL := cfg.MinIOConfig.UseSSL
+	minIOClient, err := minio.NewMinIO(minIOEndpoint, minIOUseSSL, cfg.MinIOConfig.Bucket, logger)
+	if err != nil {
+		return fmt.Errorf("create minio client: %w", err)
+	}
+
 	// --- Application services (use cases) over ports ---
 
 	healthService := service.NewHealthService(map[string]service.Pinger{
@@ -95,6 +104,12 @@ func run() error {
 	)
 	orgService := service.NewOrganizationService(db)
 
+	// --- Procurement-request use case ---
+	prService := service.NewProcurementRequestService(db, logger)
+
+	// --- Quotation use case ---
+	qService := service.NewQuotationService(db, db, minIOClient, logger)
+
 	// --- Transport: thin handlers + server assembly ---
 
 	engine := server.New(server.Deps{
@@ -105,6 +120,8 @@ func run() error {
 			Health: handler.NewHealthHandler(healthService),
 			Auth:   handler.NewAuthHandler(authService, cfg.IsProduction(), cfg.SessionTTL, logger),
 			Org:    handler.NewOrgHandler(orgService, logger),
+			Requests: handler.NewProcurementRequestHandler(prService, logger),
+			Quotations: handler.NewQuotationUploadHandler(qService, logger),
 		},
 	})
 

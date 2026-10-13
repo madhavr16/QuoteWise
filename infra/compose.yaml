@@ -92,6 +92,9 @@ services:
       # Hosts are service names inside the Compose network.
       DATABASE_URL: postgresql://${POSTGRES_USER:-quotewise}:${POSTGRES_PASSWORD:-quotewise-dev}@postgres:5432/${POSTGRES_DB:-quotewise}
       AI_SERVICE_URL: http://ai-service:8000
+      MINIO_API_PORT: ${MINIO_API_PORT:-9000}
+      MINIO_BUCKET: ${MINIO_BUCKET:-quotewise-quotations}
+      MINIO_USE_SSL: ${MINIO_USE_SSL:-false}
     ports:
       - "${HTTP_PORT:-18069}:8080"
     depends_on:

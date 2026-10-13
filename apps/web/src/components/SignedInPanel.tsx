@@ -2,7 +2,8 @@ import { useCallback, useEffect, useState } from "react";
 import { ApiError, api, type Me, type Member } from "../api";
 
 // Signed-in home: current user, organization, role, the member list,
-// and sign-out. Procurement requests land with Milestone 2 part 2.
+// procurement requests, and sign-out. Procurement requests land with
+// Milestone 2 part 2.
 
 interface Props {
   me: Me;
@@ -14,9 +15,16 @@ type MembersState =
   | { kind: "error"; message: string }
   | { kind: "loaded"; members: Member[] };
 
+type RequestState =
+  | { kind: "idle" }
+  | { kind: "loading" }
+  | { kind: "error"; message: string }
+  | { kind: "loaded"; request: { id: string; title: string; currency: string; status: string; created_at: string }; quotations: { id: string; vendor_name: string; original_filename: string; status: string; created_at: string }[] };
+
 export default function SignedInPanel({ me, onSignedOut }: Props) {
   const [membersState, setMembersState] = useState<MembersState>({ kind: "loading" });
   const [signingOut, setSigningOut] = useState(false);
+  const [requestState, setRequestState] = useState<RequestState>({ kind: "idle" });
 
   const loadMembers = useCallback(async () => {
     setMembersState({ kind: "loading" });
@@ -47,6 +55,49 @@ export default function SignedInPanel({ me, onSignedOut }: Props) {
       onSignedOut();
     }
   };
+
+  const createRequest = useCallback(async () => {
+    setRequestState({ kind: "loading" });
+    try {
+      const response = await api.createProcurementRequest({ title: "New request", currency: "USD" });
+      setRequestState({
+        kind: "loaded",
+        request: { id: response.id, title: "New request", currency: "USD", status: "draft", created_at: new Date().toISOString() },
+        quotations: [],
+      });
+    } catch (error) {
+      setRequestState({
+        kind: "error",
+        message: error instanceof ApiError ? error.message : "Unexpected error.",
+      });
+    }
+  }, []);
+
+  const loadRequests = useCallback(async () => {
+    setRequestState({ kind: "loading" });
+    try {
+      const requests = await api.listProcurementRequests();
+      // For each request, load its quotations
+      const requestsWithQuotes = await Promise.all(requests.map(async (req) => {
+        const quotations = await api.listQuotations(req.id);
+        return { ...req, quotations };
+      }));
+      setRequestState({
+        kind: "loaded",
+        request: requestsWithQuotes.length > 0 ? requestsWithQuotes[0] : { id: "", title: "", currency: "", status: "", created_at: "" },
+        quotations: requestsWithQuotes.length > 0 ? requestsWithQuotes[0].quotations : [],
+      });
+    } catch (error) {
+      setRequestState({
+        kind: "error",
+        message: error instanceof ApiError ? error.message : "Unexpected error.",
+      });
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadRequests();
+  }, [loadRequests]);
 
   return (
     <>
@@ -98,6 +149,57 @@ export default function SignedInPanel({ me, onSignedOut }: Props) {
           </table>
         )}
       </section>
+
+      {/* Create procurement request */}
+      {requestState.kind === "idle" && (
+        <section className="panel" aria-label="Create procurement request">
+          <h2>Create procurement request</h2>
+          <p>Add a new purchase request under your organization.</p>
+          <button onClick={() => void createRequest()}>Create request</button>
+        </section>
+      )}
+
+      {requestState.kind === "loading" && (
+        <section className="panel">
+          <h2>Creating request…</h2>
+          <p>Your procurement request is being created.</p>
+        </section>
+      )}
+
+      {requestState.kind === "error" && (
+        <section className="panel" aria-label="Error">
+          <h2>Error</h2>
+          <p>{requestState.message}</p>
+        </section>
+      )}
+
+      {requestState.kind === "loaded" && (
+        <section className="panel" aria-label="Procurement request detail">
+          <h2>Procurement request</h2>
+          <p>
+            <strong>Title:</strong> {requestState.request.title}<br />
+            <strong>Currency:</strong> {requestState.request.currency}<br />
+            <strong>Status:</strong> {requestState.request.status}<br />
+            <strong>Created:</strong> {requestState.request.created_at}
+          </p>
+
+          <h3>Quotations ({requestState.quotations.length})</h3>
+          {requestState.quotations.length === 0 && (
+            <p>No quotations yet.</p>
+          )}
+          {requestState.quotations.length > 0 && (
+            <ul>
+              {requestState.quotations.map((q) => (
+                <li key={q.id}>
+                  <strong>{q.vendor_name}</strong> — {q.original_filename} — {q.status}
+                </li>
+              ))}
+            </ul>
+          )}
+
+          <button onClick={() => void loadRequests()}>Refresh quotations</button>
+        </section>
+      )}
     </>
   );
 }

@@ -28,9 +28,11 @@ type Deps struct {
 
 // Handlers carries every mounted handler; one field per resource.
 type Handlers struct {
-	Health *handler.HealthHandler
-	Auth   *handler.AuthHandler
-	Org    *handler.OrgHandler
+	Health       *handler.HealthHandler
+	Auth         *handler.AuthHandler
+	Org          *handler.OrgHandler
+	Requests     *handler.ProcurementRequestHandler
+	Quotations   *handler.QuotationUploadHandler
 }
 
 // New builds the Gin engine with global middleware and routes.
@@ -71,6 +73,13 @@ func New(deps Deps) *gin.Engine {
 	protected.GET("/me", deps.Handlers.Org.Me)
 	protected.GET("/organizations/current", deps.Handlers.Org.CurrentOrganization)
 	protected.GET("/organizations/current/members", deps.Handlers.Org.Members)
+
+	// Procurement requests and their quotations (Milestone 2 part 2).
+	protected.POST("/procurement-requests", deps.Handlers.Requests.Create)
+	protected.GET("/procurement-requests", deps.Handlers.Requests.List)
+	protected.GET("/procurement-requests/:id", deps.Handlers.Requests.Get)
+	protected.POST("/procurement-requests/:id/quotations", deps.Handlers.Quotations.Upload)
+	protected.GET("/procurement-requests/:id/quotations", deps.Handlers.Quotations.List)
 
 	r.HandleMethodNotAllowed = true
 	r.NoMethod(func(c *gin.Context) {

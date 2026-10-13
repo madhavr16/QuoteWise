@@ -8,6 +8,9 @@ import (
 func TestLoadAppliesDefaultsForOptionalValues(t *testing.T) {
 	t.Setenv("DATABASE_URL", "postgresql://user:pass@localhost:5432/quotewise")
 	t.Setenv("AI_SERVICE_URL", "http://localhost:8000")
+	t.Setenv("MINIO_API_PORT", "localhost:9000")
+	t.Setenv("MINIO_BUCKET", "quotewise-quotations")
+	t.Setenv("MINIO_USE_SSL", "false")
 
 	cfg, err := Load()
 	if err != nil {
@@ -72,6 +75,9 @@ func TestLoadNormalizesAndAcceptsProductionOverrides(t *testing.T) {
 	t.Setenv("LOG_FORMAT", "text")
 	t.Setenv("DATABASE_URL", "postgres://user:pass@db.internal:5432/quotewise")
 	t.Setenv("AI_SERVICE_URL", "https://ai.internal:8000")
+	t.Setenv("MINIO_API_PORT", "localhost:9000")
+	t.Setenv("MINIO_BUCKET", "quotewise-quotations")
+	t.Setenv("MINIO_USE_SSL", "true")
 
 	cfg, err := Load()
 	if err != nil {

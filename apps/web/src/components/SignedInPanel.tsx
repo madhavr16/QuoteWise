@@ -77,15 +77,33 @@ export default function SignedInPanel({ me, onSignedOut }: Props) {
     setRequestState({ kind: "loading" });
     try {
       const requests = await api.listProcurementRequests();
-      // For each request, load its quotations
-      const requestsWithQuotes = await Promise.all(requests.map(async (req) => {
-        const quotations = await api.listQuotations(req.id);
-        return { ...req, quotations };
-      }));
+
+      if (requests.length === 0) {
+        setRequestState({
+          kind: "loaded",
+          request: { id: "", title: "", currency: "", status: "", created_at: "" },
+          quotations: [],
+        });
+        return;
+      }
+
+      const requestsWithQuotes = [] as Array<{ id: string; title: string; currency: string; status: string; created_at: string; quotations: { id: string; vendor_name: string; original_filename: string; status: string; created_at: string }[] }>;
+
+      for (const req of requests) {
+        try {
+          const quotations = await api.listQuotations(req.id);
+          requestsWithQuotes.push({ ...req, quotations });
+        } catch {
+          // Keep the request visible even if quotation metadata fails to load.
+          requestsWithQuotes.push({ ...req, quotations: [] });
+        }
+      }
+
+      const selectedRequest = requestsWithQuotes[0];
       setRequestState({
         kind: "loaded",
-        request: requestsWithQuotes.length > 0 ? requestsWithQuotes[0] : { id: "", title: "", currency: "", status: "", created_at: "" },
-        quotations: requestsWithQuotes.length > 0 ? requestsWithQuotes[0].quotations : [],
+        request: selectedRequest ?? { id: "", title: "", currency: "", status: "", created_at: "" },
+        quotations: selectedRequest?.quotations ?? [],
       });
     } catch (error) {
       setRequestState({

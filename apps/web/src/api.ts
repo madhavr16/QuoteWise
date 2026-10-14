@@ -146,7 +146,13 @@ export const api = {
 
   /** List the organization's procurement requests, newest first. */
   listProcurementRequests(): Promise<{ id: string; title: string; currency: string; status: string; created_at: string }[]> {
-    return request<{ id: string; title: string; currency: string; status: string; created_at: string }[]>("/api/v1/procurement-requests");
+    return request<{ requests?: { id: string; title: string; currency: string; status: string; created_at: string }[] } | { id: string; title: string; currency: string; status: string; created_at: string }[]>("/api/v1/procurement-requests")
+      .then((body) => {
+        if (Array.isArray(body)) {
+          return body;
+        }
+        return body.requests ?? [];
+      });
   },
 
   /** Get one procurement request by ID. */
@@ -185,6 +191,12 @@ export const api = {
 
   /** List quotations for a procurement request, newest first. */
   listQuotations(requestId: string): Promise<{ id: string; vendor_name: string; original_filename: string; status: string; created_at: string }[]> {
-    return request<{ id: string; vendor_name: string; original_filename: string; status: string; created_at: string }[]>("/api/v1/procurement-requests/" + requestId + "/quotations");
+    return request<{ quotations?: { id: string; vendor_name: string; original_filename: string; status: string; created_at: string }[] } | { id: string; vendor_name: string; original_filename: string; status: string; created_at: string }[]>("/api/v1/procurement-requests/" + requestId + "/quotations")
+      .then((body) => {
+        if (Array.isArray(body)) {
+          return body;
+        }
+        return body.quotations ?? [];
+      });
   },
 };
